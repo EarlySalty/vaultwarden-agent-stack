@@ -1,0 +1,10 @@
+/target
+# Enthalten Geheimnisse:
+config.toml
+.env
+.env.broker
+*.secret
+# Lokale Datenbanken
+*.db
+*.db-wal
+*.db-shm

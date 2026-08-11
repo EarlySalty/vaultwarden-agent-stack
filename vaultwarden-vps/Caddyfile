@@ -1,0 +1,55 @@
+# Caddy-Konfiguration fuer Vaultwarden
+#
+# {$DOMAIN} und {$ACME_EMAIL} werden aus den Umgebungsvariablen des
+# Caddy-Containers ersetzt (siehe docker-compose.yml -> caddy -> environment).
+# Caddy holt und erneuert die Let's-Encrypt-Zertifikate vollautomatisch,
+# leitet HTTP auf HTTPS um und spricht HTTP/2 sowie HTTP/3.
+{
+	# E-Mail-Adresse fuer Let's Encrypt (Ablauf-Warnungen, Account-Wiederherstellung)
+	email {$ACME_EMAIL}
+
+	# Zum Testen ohne Rate-Limit-Risiko kann die Staging-CA aktiviert werden.
+	# Achtung: Staging-Zertifikate sind im Browser NICHT vertrauenswuerdig.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	# Kompression fuer das Web-Vault
+	encode zstd gzip
+
+	header {
+		# HTTPS erzwingen (2 Jahre). "preload" nur setzen, wenn die Domain
+		# wirklich dauerhaft nur per HTTPS laufen soll.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		# Kein MIME-Type-Raten
+		X-Content-Type-Options "nosniff"
+		# Kein Einbetten in fremde Frames (Clickjacking)
+		X-Frame-Options "SAMEORIGIN"
+		# Referer nur an die eigene Domain senden
+		Referrer-Policy "same-origin"
+		# Browser-APIs, die Vaultwarden nicht braucht, abschalten
+		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		# Veralteter XSS-Filter: bewusst aus (moderne Browser ignorieren ihn,
+		# alte Implementierungen waren selbst angreifbar)
+		X-XSS-Protection "0"
+		# Server-Kennung nicht verraten
+		-Server
+	}
+
+	reverse_proxy vaultwarden:80 {
+		# Vaultwarden liest die Client-IP standardmaessig aus X-Real-IP.
+		# Ohne diese Zeile stuenden in den Logs nur Caddys Container-IPs -
+		# fail2ban wuerde dann den Reverse-Proxy statt des Angreifers sperren.
+		header_up X-Real-IP {remote_host}
+	}
+
+	# ---------------------------------------------------------------
+	# Optional: Admin-Panel nur aus dem eigenen Netz erreichbar machen.
+	# Dazu die folgenden Zeilen einkommentieren und die IP anpassen.
+	# ---------------------------------------------------------------
+	# @admin_gesperrt {
+	# 	path /admin*
+	# 	not remote_ip 203.0.113.7 192.168.0.0/16
+	# }
+	# respond @admin_gesperrt "Not Found" 404
+}

@@ -1,0 +1,34 @@
+[package]
+name = "vw-agent-broker"
+version = "0.1.0"
+edition = "2021"
+description = "Policy-Broker zwischen AI-Agents und einem selbstgehosteten Vaultwarden"
+license = "MIT"
+
+[[bin]]
+name = "broker"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "io-std", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+toml = "0.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+# Note: no panic="abort" on purpose - a panicking request should kill only its
+# own task, not the whole broker process.

@@ -1,0 +1,176 @@
+# ============================================================================
+#  Agent-Stack (Broker + bw-CLI-Sidecar + ntfy) als Ergaenzung zum
+#  bestehenden Vaultwarden-Stack.
+#
+#  Diese Datei liegt in <vaultwarden-verzeichnis>/vw-agent-broker/ und wird
+#  IMMER zusammen mit der Haupt-Compose-Datei gestartet, damit beide im
+#  selben Compose-Projekt und im selben Netz landen:
+#
+#    cd /pfad/zum/vaultwarden-stack
+#    docker compose -f docker-compose.yml \
+#                   -f vw-agent-broker/docker-compose.agent.yml up -d
+#
+#  WICHTIG: Alle relativen Pfade unten sind relativ zum Verzeichnis der
+#  ERSTEN Compose-Datei (also zum Vaultwarden-Verzeichnis) - deshalb ueberall
+#  das Praefix ./vw-agent-broker/.
+#
+#  Damit man das nicht jedes Mal tippt, in der .env eintragen:
+#    COMPOSE_FILE=docker-compose.yml:vw-agent-broker/docker-compose.agent.yml
+#  Danach genuegt ein schlichtes "docker compose up -d".
+# ============================================================================
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Bitwarden CLI im Serve-Modus. Haelt als EINZIGER die Vault-Schluessel des
+  # agent-Kontos. Kein "ports:" - nur ueber das interne Netz erreichbar.
+  # --------------------------------------------------------------------------
+  bw:
+    build:
+      context: ./vw-agent-broker/bw-cli
+    image: vw-agent-bw:local
+    container_name: vw-agent-bw
+    restart: unless-stopped
+
+    environment:
+      # Eigener Vaultwarden - dieselbe URL wie VAULTWARDEN_DOMAIN.
+      VW_URL: ${VAULTWARDEN_DOMAIN:?VAULTWARDEN_DOMAIN fehlt - siehe .env}
+      # NUR der API-Key des agent@-Kontos. Damit kann sich die CLI anmelden,
+      # den Tresor aber NICHT entschluesseln - das Master-Passwort liegt
+      # bewusst nirgends auf dem Server.
+      BW_CLIENTID: ${BW_CLIENTID:?BW_CLIENTID fehlt - siehe BROKER.md}
+      BW_CLIENTSECRET: ${BW_CLIENTSECRET:?BW_CLIENTSECRET fehlt - siehe BROKER.md}
+      NODE_ENV: production
+      TZ: ${TZ:-Europe/Berlin}
+      # ---------------------------------------------------------------
+      # Optionaler Auto-Unlock nach einem Reboot (NICHT empfohlen, siehe
+      # BROKER.md). Dazu diese Zeile und den secrets-Block unten aktivieren:
+      # BW_PASSWORD_FILE: /run/secrets/bw_password
+      # ---------------------------------------------------------------
+    # secrets:
+    #   - bw_password
+
+    volumes:
+      # Enthaelt data.json der CLI (verschluesselter Vault-Cache + Session).
+      - bw_data:/data
+
+    expose:
+      - "8087"
+
+    networks:
+      - vaultwarden_net
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # Der Broker: setzt Policies durch, holt Freigaben ein, auditiert alles.
+  # --------------------------------------------------------------------------
+  broker:
+    build:
+      context: ./vw-agent-broker
+    image: vw-agent-broker:local
+    container_name: vw-agent-broker
+    restart: unless-stopped
+
+    environment:
+      BROKER_CONFIG: /etc/broker/config.toml
+      BROKER_BW_URL: http://bw:8087
+      BROKER_DB_PATH: /data/broker.db
+      RUST_LOG: ${BROKER_LOG:-info}
+      TZ: ${TZ:-Europe/Berlin}
+      # Secrets bevorzugt hier statt in der config.toml (Umgebung gewinnt):
+      # BROKER_ADMIN_PASS, BROKER_SERVER_SECRET, BROKER_NTFY_TOKEN
+    env_file:
+      - ./vw-agent-broker/.env.broker
+
+    volumes:
+      - ./vw-agent-broker/config.toml:/etc/broker/config.toml:ro
+      # SQLite: Tokens, Anfragen, Merken-Regeln, Audit-Log. Keine Passwoerter.
+      - broker_data:/data
+
+    depends_on:
+      - bw
+
+    expose:
+      - "8088"
+
+    networks:
+      - vaultwarden_net
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # ntfy: verschickt die Freigabe-Push-Nachrichten an Handy/Desktop.
+  # --------------------------------------------------------------------------
+  ntfy:
+    image: binwiederhier/ntfy
+    container_name: vw-agent-ntfy
+    restart: unless-stopped
+    command: ["serve"]
+
+    environment:
+      NTFY_BASE_URL: https://${NTFY_DOMAIN:?NTFY_DOMAIN fehlt - siehe .env}
+      NTFY_LISTEN_HTTP: ":80"
+      # Laeuft hinter Caddy - damit ntfy die echte Client-IP sieht.
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      NTFY_CACHE_DURATION: "12h"
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      # Standardmaessig darf NIEMAND lesen oder schreiben. Zugriff gibt es
+      # nur ueber angelegte Benutzer/Tokens (siehe BROKER.md).
+      # Das ist wichtig: Wer die Nachricht lesen kann, kann freigeben!
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      TZ: ${TZ:-Europe/Berlin}
+
+    volumes:
+      - ntfy_cache:/var/cache/ntfy
+      - ntfy_data:/var/lib/ntfy
+
+    expose:
+      - "80"
+
+    networks:
+      - vaultwarden_net
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --------------------------------------------------------------------------
+  # Der bestehende Caddy-Dienst wird nur ERGAENZT: er braucht die beiden
+  # neuen Hostnamen als Variablen und das zusaetzliche Caddyfile-Snippet.
+  # --------------------------------------------------------------------------
+  caddy:
+    environment:
+      BROKER_DOMAIN: ${BROKER_DOMAIN:?BROKER_DOMAIN fehlt - siehe .env}
+      NTFY_DOMAIN: ${NTFY_DOMAIN:?NTFY_DOMAIN fehlt - siehe .env}
+    volumes:
+      - ./vw-agent-broker/Caddyfile.agent:/etc/caddy/conf.d/agent.caddy:ro
+    depends_on:
+      - broker
+      - ntfy
+
+# Nur noetig, wenn oben der optionale Auto-Unlock aktiviert wurde.
+# secrets:
+#   bw_password:
+#     file: ./vw-agent-broker/bw_password.secret
+
+volumes:
+  bw_data:
+  broker_data:
+  ntfy_cache:
+  ntfy_data:
+
+networks:
+  vaultwarden_net:
+    driver: bridge

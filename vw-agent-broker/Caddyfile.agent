@@ -1,0 +1,70 @@
+# ============================================================================
+#  Caddy-Snippet fuer den Agent-Stack (Broker + ntfy)
+#
+#  Wird von docker-compose.agent.yml nach /etc/caddy/conf.d/agent.caddy
+#  gemountet. Damit Caddy es laedt, EINMALIG ans Ende der bestehenden
+#  Caddyfile (im Vaultwarden-Verzeichnis) diese Zeile anhaengen:
+#
+#      import /etc/caddy/conf.d/*.caddy
+#
+#  Danach:  docker compose restart caddy
+#
+#  {$BROKER_DOMAIN} und {$NTFY_DOMAIN} kommen aus der Umgebung des
+#  Caddy-Containers (siehe docker-compose.agent.yml -> caddy -> environment).
+#  Beide brauchen einen eigenen DNS-A-Record auf die VPS-IP, sonst kann
+#  Let's Encrypt kein Zertifikat ausstellen.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# broker.DEINE-DOMAIN  ->  vw-agent-broker
+# ----------------------------------------------------------------------------
+{$BROKER_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# Die Freigabe-Links duerfen nicht in Suchmaschinen o.ae. landen.
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	reverse_proxy broker:8088 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	# ---------------------------------------------------------------
+	# Optional, empfohlen: Das Dashboard zusaetzlich auf das eigene
+	# Netz begrenzen. Die Agent-API (/v1) und die ntfy-Freigabe-Links
+	# (/approve, /deny) muessen erreichbar bleiben!
+	# ---------------------------------------------------------------
+	# @admin_fremd {
+	# 	path /admin*
+	# 	not remote_ip 203.0.113.7 192.168.0.0/16
+	# }
+	# respond @admin_fremd "Not Found" 404
+}
+
+# ----------------------------------------------------------------------------
+# ntfy.DEINE-DOMAIN  ->  ntfy
+# ----------------------------------------------------------------------------
+{$NTFY_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	reverse_proxy ntfy:80 {
+		header_up X-Real-IP {remote_host}
+
+		# ntfy haelt Verbindungen fuer den Live-Empfang (SSE/Websocket) sehr
+		# lange offen. -1 schaltet die Zwischenspeicherung ab, damit
+		# Nachrichten sofort durchgereicht werden.
+		flush_interval -1
+	}
+}

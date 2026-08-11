@@ -1,0 +1,87 @@
+# Vaultwarden + Caddy (automatisches HTTPS via Let's Encrypt)
+#
+# Aufbau:
+#   Internet --> Caddy (Port 80/443, TLS-Terminierung) --> vaultwarden:80 (nur internes Docker-Netz)
+#
+# Vaultwarden selbst veroeffentlicht KEINEN Port auf dem Host. Nur Caddy ist von
+# aussen erreichbar. Aktuelle Vaultwarden-Versionen liefern WebSockets (Live-Sync)
+# ueber denselben Port 80 aus - ein separater Port 3012 / WEBSOCKET_PORT ist
+# nicht mehr noetig und waere sogar falsch.
+
+services:
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+
+    # Alle Einstellungen kommen aus .env (siehe .env.example)
+    env_file:
+      - .env
+
+    # DOMAIN muss fuer Vaultwarden die vollstaendige URL mit https:// sein,
+    # waehrend Caddy nur den nackten Hostnamen braucht. Deshalb halten wir in
+    # der .env zwei Variablen und mappen hier explizit.
+    # Werte unter "environment" haben Vorrang vor "env_file".
+    environment:
+      DOMAIN: ${VAULTWARDEN_DOMAIN:?VAULTWARDEN_DOMAIN fehlt - bitte .env anlegen (siehe .env.example) oder ./setup.sh ausfuehren}
+
+    volumes:
+      # Enthaelt db.sqlite3, attachments/, sends/, rsa_key*, config.json, icon_cache/
+      - ./vw-data:/data
+
+    # Nur intern erreichbar - bewusst kein "ports:"-Eintrag.
+    expose:
+      - "80"
+
+    networks:
+      - vaultwarden_net
+
+    # Log-Rotation, damit der VPS nicht volllaeuft
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3 (QUIC) - deutlich schnellerer Verbindungsaufbau fuer die Clients
+      - "443:443/udp"
+
+    # Caddy bekommt bewusst NUR diese beiden Variablen (keine Secrets wie ADMIN_TOKEN).
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN fehlt - bitte .env anlegen (siehe .env.example) oder ./setup.sh ausfuehren}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL fehlt - bitte .env anlegen (siehe .env.example) oder ./setup.sh ausfuehren}
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Hier liegen die Let's-Encrypt-Zertifikate - unbedingt als Volume halten,
+      # sonst wird bei jedem Neustart neu ausgestellt (Rate-Limits!).
+      - caddy_data:/data
+      - caddy_config:/config
+
+    depends_on:
+      - vaultwarden
+
+    networks:
+      - vaultwarden_net
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  vaultwarden_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,64 @@
+# ============================================================================
+#  fail2ban-Jails fuer Vaultwarden   (optional, aber sehr empfehlenswert)
+#
+#  Ablage auf dem Host:
+#      /etc/fail2ban/jail.d/vaultwarden.local
+#
+#  Voraussetzungen:
+#    1. In der .env ist LOG_FILE=/data/vaultwarden.log gesetzt (Standard in
+#       diesem Paket). Auf dem Host liegt die Datei damit unter
+#       <Paketverzeichnis>/vw-data/vaultwarden.log
+#    2. Im Caddyfile steht "header_up X-Real-IP {remote_host}" und in der .env
+#       IP_HEADER=X-Real-IP - sonst protokolliert Vaultwarden nur die interne
+#       Docker-IP von Caddy und fail2ban wuerde den Reverse Proxy sperren.
+#    3. Die beiden Filter aus filter.d-vaultwarden.conf bzw.
+#       filter.d-vaultwarden-admin.conf sind installiert.
+#
+#  logpath unten an den eigenen Pfad anpassen!
+# ============================================================================
+
+[vaultwarden]
+enabled  = true
+port     = 80,443
+filter   = vaultwarden
+logpath  = /opt/vaultwarden-vps/vw-data/vaultwarden.log
+# 5 Fehlversuche innerhalb von 30 Minuten
+maxretry = 5
+findtime = 1800
+# Sperre fuer 12 Stunden, auf allen Ports
+bantime  = 43200
+banaction = %(banaction_allports)s
+# Bei aktivem UFW stattdessen:
+# banaction = ufw
+
+# Getrennter Jail fuer das Admin-Panel: dort wird deutlich frueher gesperrt,
+# weil es dafuer keinen legitimen Grund zum Vertippen in Serie gibt.
+[vaultwarden-admin]
+enabled  = true
+port     = 80,443
+filter   = vaultwarden-admin
+logpath  = /opt/vaultwarden-vps/vw-data/vaultwarden.log
+maxretry = 3
+findtime = 1800
+bantime  = 86400
+banaction = %(banaction_allports)s
+
+# ----------------------------------------------------------------------------
+# Einrichtung in Kurzform:
+#
+#   apt install fail2ban
+#   cp fail2ban/vaultwarden.local              /etc/fail2ban/jail.d/vaultwarden.local
+#   cp fail2ban/filter.d-vaultwarden.conf      /etc/fail2ban/filter.d/vaultwarden.conf
+#   cp fail2ban/filter.d-vaultwarden-admin.conf /etc/fail2ban/filter.d/vaultwarden-admin.conf
+#   # logpath in jail.d/vaultwarden.local anpassen
+#   systemctl restart fail2ban
+#
+# Kontrolle:
+#   fail2ban-client status vaultwarden
+#   fail2ban-client status vaultwarden-admin
+#   fail2ban-regex /opt/vaultwarden-vps/vw-data/vaultwarden.log \
+#                  /etc/fail2ban/filter.d/vaultwarden.conf
+#
+# Sperre wieder aufheben (falls man sich selbst aussperrt):
+#   fail2ban-client set vaultwarden unbanip 203.0.113.7
+# ----------------------------------------------------------------------------

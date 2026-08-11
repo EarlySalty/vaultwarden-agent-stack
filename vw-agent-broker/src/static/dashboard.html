@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vaultwarden Agent Broker</title>
+<style>
+  :root{
+    --bg:#16191d; --panel:#1f242a; --panel2:#242a31; --line:#2f3540;
+    --fg:#e6e9ef; --muted:#98a2b0; --accent:#175ddc; --accent2:#3b7ce8;
+    --ok:#4caf50; --warn:#f0ad4e; --bad:#d9534f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{background:var(--panel);border-bottom:1px solid var(--line);
+         padding:.9rem 1.25rem;display:flex;align-items:center;gap:.75rem;
+         position:sticky;top:0;z-index:5}
+  header h1{font-size:1.05rem;margin:0;font-weight:600}
+  header .dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--muted)}
+  header .spacer{flex:1}
+  main{max-width:1180px;margin:0 auto;padding:1.25rem}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;
+          margin-bottom:1.25rem;overflow:hidden}
+  section > h2{margin:0;padding:.75rem 1rem;font-size:.95rem;font-weight:600;
+               border-bottom:1px solid var(--line);background:var(--panel2);
+               display:flex;align-items:center;gap:.5rem}
+  .body{padding:1rem}
+  table{width:100%;border-collapse:collapse;font-size:.88rem}
+  th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);
+        vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:.78rem;text-transform:uppercase;
+     letter-spacing:.03em}
+  tr:last-child td{border-bottom:none}
+  .muted{color:var(--muted)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem}
+  button{background:var(--accent);color:#fff;border:0;border-radius:.35rem;
+         padding:.4rem .7rem;font-size:.83rem;cursor:pointer;font-weight:500}
+  button:hover{background:var(--accent2)}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--fg)}
+  button.ghost:hover{background:var(--panel2)}
+  button.danger{background:var(--bad)}
+  button.ok{background:var(--ok)}
+  select,input{background:var(--bg);color:var(--fg);border:1px solid var(--line);
+               border-radius:.35rem;padding:.38rem .5rem;font-size:.85rem}
+  .pill{display:inline-block;padding:.1rem .45rem;border-radius:.7rem;font-size:.72rem;
+        font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  .p-auto{background:rgba(76,175,80,.16);color:#7fd184}
+  .p-ask{background:rgba(240,173,78,.16);color:#f0c078}
+  .p-deny{background:rgba(217,83,79,.16);color:#e88b87}
+  .p-pending{background:rgba(23,93,220,.2);color:#8ab0f5}
+  .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.6rem}
+  .kv{background:var(--panel2);border:1px solid var(--line);border-radius:.4rem;padding:.55rem .7rem}
+  .kv b{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;
+        letter-spacing:.03em;font-weight:600}
+  .empty{color:var(--muted);font-style:italic;padding:.4rem 0}
+  .toast{position:fixed;right:1rem;bottom:1rem;background:var(--panel2);
+         border:1px solid var(--line);border-left:3px solid var(--accent);
+         padding:.7rem .9rem;border-radius:.4rem;max-width:32rem;display:none;z-index:20}
+  .secret{background:#0d1013;border:1px dashed var(--warn);border-radius:.4rem;
+          padding:.6rem;margin-top:.6rem;word-break:break-all}
+  #locksec{border-color:var(--warn)}
+  #locksec > h2{background:rgba(240,173,78,.12);border-bottom-color:var(--warn)}
+  nav{display:flex;gap:.25rem}
+  nav button{background:transparent;color:var(--muted);padding:.3rem .6rem}
+  nav button.active{background:var(--panel2);color:var(--fg)}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="health"></span>
+  <h1>Vaultwarden Agent Broker</h1>
+  <span class="muted mono" id="healthtxt"></span>
+  <span class="spacer"></span>
+  <nav>
+    <button class="active" data-refresh>Aktualisieren</button>
+  </nav>
+</header>
+
+<main>
+  <section id="locksec" style="display:none">
+    <h2>🔒 Tresor gesperrt</h2>
+    <div class="body">
+      <p style="margin-top:0">
+        Der Tresor des Agent-Kontos ist gesperrt. Solange das so ist, bekommen
+        Agents <b>keine</b> Zugangsdaten (HTTP 503). Zum Entsperren das
+        Master-Passwort des <b>agent-Kontos</b> eingeben.
+      </p>
+      <p class="muted" style="margin-top:0">
+        Das Passwort wird nur fuer diesen einen Aufruf verwendet: Es geht an den
+        bw-Sidecar und wird weder protokolliert noch gespeichert.
+      </p>
+      <form class="row" id="unlockform" autocomplete="off">
+        <input type="password" id="mpw" placeholder="Master-Passwort des agent-Kontos"
+               style="min-width:22rem" autocomplete="current-password">
+        <button type="submit" id="unlockbtn">Entsperren</button>
+        <span class="muted" id="unlockmsg"></span>
+      </form>
+    </div>
+  </section>
+
+  <section>
+    <h2>Offene Anfragen <span class="muted" id="reqcount"></span></h2>
+    <div class="body"><div id="requests"><div class="empty">lade ...</div></div></div>
+  </section>
+
+  <section>
+    <h2>Merken-Regeln</h2>
+    <div class="body">
+      <p class="muted" style="margin-top:0">
+        Regeln heben <b>ask</b> voruebergehend oder dauerhaft auf <b>auto</b> an -
+        nur fuer die Kombination Eintrag + Agent und nur in der Broker-Datenbank.
+        Ein Eintrag mit <b>deny</b> bleibt gesperrt.
+      </p>
+      <div id="rules"><div class="empty">lade ...</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Agent-Tokens</h2>
+    <div class="body">
+      <div class="row" style="margin-bottom:.8rem">
+        <input id="t_name" placeholder="Name, z.B. claude-desktop" style="min-width:14rem">
+        <input id="t_cols" placeholder="Sammlungs-IDs, kommagetrennt (leer = alle)" style="min-width:20rem">
+        <select id="t_max">
+          <option value="">max_policy: keine Begrenzung</option>
+          <option value="ask">max_policy: ask (nie automatisch)</option>
+          <option value="deny">max_policy: deny (gesperrt)</option>
+        </select>
+        <button id="t_add">Token anlegen</button>
+      </div>
+      <div id="newtoken"></div>
+      <div id="tokens"><div class="empty">lade ...</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Audit-Log</h2>
+    <div class="body">
+      <div class="row" style="margin-bottom:.6rem">
+        <label class="muted">Zeilen</label>
+        <select id="auditlimit">
+          <option>50</option><option selected>100</option>
+          <option>250</option><option>1000</option>
+        </select>
+      </div>
+      <div id="audit"><div class="empty">lade ...</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Einstellungen</h2>
+    <div class="body"><div class="grid" id="settings"></div></div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg, bad) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.style.borderLeftColor = bad ? 'var(--bad)' : 'var(--ok)';
+  t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = 'none', 4500);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
+  const txt = await r.text();
+  let body = {};
+  try { body = txt ? JSON.parse(txt) : {}; } catch (e) { body = { error: txt }; }
+  if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+  return body;
+}
+
+const ts = s => s ? new Date(s * 1000).toLocaleString('de-DE') : '-';
+const pill = p => `<span class="pill p-${esc(p)}">${esc(p)}</span>`;
+
+function table(head, rows) {
+  if (!rows.length) return '<div class="empty">nichts vorhanden</div>';
+  return `<table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${rows.join('')}</tbody></table>`;
+}
+
+// --------------------------------------------------------------- requests
+async function loadRequests() {
+  try {
+    const d = await api('/admin/api/requests?limit=50');
+    const pending = d.requests.filter(r => r.status === 'pending');
+    $('#reqcount').textContent = pending.length ? `(${pending.length})` : '';
+    const rows = d.requests.map(r => {
+      const rest = r.expires_at - d.now;
+      const actions = r.status === 'pending'
+        ? `<div class="row">
+             <select id="rem_${r.id}">
+               <option value="none">nur dieses Mal</option>
+               <option value="1h">+ 1 Stunde merken</option>
+               <option value="24h">+ 24 Stunden merken</option>
+               <option value="forever">immer merken</option>
+             </select>
+             <button class="ok" onclick="decide('${r.id}','approve')">Freigeben</button>
+             <button class="danger" onclick="decide('${r.id}','deny')">Verweigern</button>
+           </div>`
+        : `<span class="muted">${esc(r.decided_by || '')}</span>`;
+      return `<tr>
+        <td><b>${esc(r.item_name)}</b><br><span class="muted mono">${esc(r.item_id)}</span></td>
+        <td>${esc(r.agent)}</td>
+        <td class="mono">${esc((r.fields || []).join(', '))}</td>
+        <td>${pill(r.status)}<br><span class="muted">${
+          r.status === 'pending' ? (rest > 0 ? 'noch ' + rest + ' s' : 'laeuft ab') : ts(r.decided_at)}</span></td>
+        <td>${actions}</td></tr>`;
+    });
+    $('#requests').innerHTML = table(
+      ['Eintrag', 'Agent', 'Felder', 'Status', 'Aktion'], rows);
+  } catch (e) { $('#requests').innerHTML = `<div class="empty">Fehler: ${esc(e.message)}</div>`; }
+}
+
+async function decide(id, what) {
+  const sel = $('#rem_' + id);
+  const remember = (what === 'approve' && sel) ? sel.value : 'none';
+  try {
+    await api(`/admin/api/requests/${id}/${what}`, {
+      method: 'POST', body: JSON.stringify({ remember })
+    });
+    toast(what === 'approve' ? 'Freigegeben.' : 'Verweigert.');
+    loadRequests(); loadRules(); loadAudit();
+  } catch (e) { toast(e.message, true); }
+}
+
+// ------------------------------------------------------------------ rules
+async function loadRules() {
+  try {
+    const d = await api('/admin/api/rules');
+    const rows = d.rules.map(r => `<tr>
+      <td><b>${esc(r.item_name || '-')}</b><br><span class="muted mono">${esc(r.item_id)}</span></td>
+      <td>${esc(r.agent)}</td>
+      <td>${r.expires_at === null ? '<b>immer</b>' : 'bis ' + ts(r.expires_at)}</td>
+      <td>${ts(r.created_at)}</td>
+      <td><button class="ghost" onclick="delRule(${r.id})">Loeschen</button></td></tr>`);
+    $('#rules').innerHTML = table(['Eintrag', 'Agent', 'Gueltig', 'Angelegt', ''], rows);
+  } catch (e) { $('#rules').innerHTML = `<div class="empty">Fehler: ${esc(e.message)}</div>`; }
+}
+
+async function delRule(id) {
+  try { await api('/admin/api/rules/' + id, { method: 'DELETE' }); toast('Regel geloescht.'); loadRules(); }
+  catch (e) { toast(e.message, true); }
+}
+
+// ----------------------------------------------------------------- tokens
+async function loadTokens() {
+  try {
+    const d = await api('/admin/api/tokens');
+    const rows = d.tokens.map(t => `<tr>
+      <td><b>${esc(t.name)}</b> <span class="muted">#${t.id}</span></td>
+      <td>${t.allowed_collections ? esc(t.allowed_collections.join(', ')) : '<span class="muted">alle sichtbaren</span>'}</td>
+      <td>${t.max_policy ? pill(t.max_policy) : '<span class="muted">-</span>'}</td>
+      <td>${ts(t.last_used_at)}</td>
+      <td>${t.revoked ? '<span class="pill p-deny">widerrufen</span>'
+                      : `<button class="danger" onclick="revoke(${t.id})">Widerrufen</button>`}</td></tr>`);
+    $('#tokens').innerHTML = table(
+      ['Name', 'Sammlungen', 'max_policy', 'Zuletzt benutzt', ''], rows);
+  } catch (e) { $('#tokens').innerHTML = `<div class="empty">Fehler: ${esc(e.message)}</div>`; }
+}
+
+async function revoke(id) {
+  if (!confirm('Token wirklich widerrufen?')) return;
+  try { await api('/admin/api/tokens/' + id, { method: 'DELETE' }); toast('Token widerrufen.'); loadTokens(); loadAudit(); }
+  catch (e) { toast(e.message, true); }
+}
+
+$('#t_add').onclick = async () => {
+  const name = $('#t_name').value.trim();
+  if (!name) return toast('Name fehlt.', true);
+  const cols = $('#t_cols').value.split(',').map(s => s.trim()).filter(Boolean);
+  try {
+    const d = await api('/admin/api/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ name, allowed_collections: cols, max_policy: $('#t_max').value })
+    });
+    $('#newtoken').innerHTML =
+      `<div class="secret"><b>Token fuer "${esc(d.name)}" - wird nur JETZT angezeigt:</b>
+       <div class="mono" style="margin-top:.4rem">${esc(d.token)}</div></div>`;
+    $('#t_name').value = ''; $('#t_cols').value = '';
+    loadTokens(); loadAudit();
+  } catch (e) { toast(e.message, true); }
+};
+
+// ------------------------------------------------------------------ audit
+async function loadAudit() {
+  try {
+    const d = await api('/admin/audit?limit=' + $('#auditlimit').value);
+    const rows = d.audit.map(a => `<tr>
+      <td class="mono">${ts(a.ts)}</td>
+      <td>${esc(a.actor)}</td>
+      <td><b>${esc(a.action)}</b></td>
+      <td>${esc(a.agent || '-')}</td>
+      <td>${esc(a.item_name || '-')}</td>
+      <td>${pill(['ok', 'approved'].includes(a.result) ? 'auto'
+                : a.result === 'pending' ? 'pending' : 'deny')} ${esc(a.result)}</td>
+      <td class="muted">${esc(a.detail || '')}</td></tr>`);
+    $('#audit').innerHTML = table(
+      ['Zeit', 'Quelle', 'Aktion', 'Agent', 'Eintrag', 'Ergebnis', 'Detail'], rows);
+  } catch (e) { $('#audit').innerHTML = `<div class="empty">Fehler: ${esc(e.message)}</div>`; }
+}
+$('#auditlimit').onchange = loadAudit;
+
+// --------------------------------------------------------------- settings
+async function loadSettings() {
+  try {
+    const s = await api('/admin/api/settings');
+    const labels = {
+      default_policy: 'Default-Policy', request_ttl: 'Anfrage gueltig (s)',
+      rate_limit: 'Rate-Limit (pro Token/min)', sync_interval: 'bw-Sync (s)',
+      bw_url: 'bw-Sidecar', ntfy_url: 'ntfy-Server', ntfy_topic: 'ntfy-Topic',
+      public_url: 'Oeffentliche URL', policy_field: 'Policy-Feld im Vault'
+    };
+    $('#settings').innerHTML = Object.keys(labels).map(k =>
+      `<div class="kv"><b>${labels[k]}</b><span class="mono">${esc(s[k] || '-')}</span></div>`).join('');
+  } catch (e) { $('#settings').innerHTML = `<div class="empty">Fehler: ${esc(e.message)}</div>`; }
+}
+
+async function loadHealth() {
+  try {
+    const r = await fetch('/healthz');
+    const d = await r.json();
+    $('#health').style.background = d.status === 'ok' ? 'var(--ok)' : 'var(--bad)';
+    $('#healthtxt').textContent = 'bw: ' + (d.bw || '?');
+    // Nur beim echten Schloss-Zustand das Formular zeigen - ist der Sidecar
+    // gar nicht erreichbar, hilft ein Passwort nicht weiter.
+    $('#locksec').style.display = (d.bw === 'locked') ? '' : 'none';
+  } catch (e) {
+    $('#health').style.background = 'var(--bad)';
+    $('#healthtxt').textContent = 'Broker nicht erreichbar';
+  }
+}
+
+$('#unlockform').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const pw = $('#mpw');
+  if (!pw.value) return toast('Passwort fehlt.', true);
+  const btn = $('#unlockbtn');
+  btn.disabled = true;
+  $('#unlockmsg').textContent = 'entsperre ...';
+  try {
+    await api('/admin/api/unlock', {
+      method: 'POST', body: JSON.stringify({ password: pw.value })
+    });
+    // Passwort sofort aus dem Formular entfernen.
+    pw.value = '';
+    $('#unlockmsg').textContent = '';
+    toast('Tresor entsperrt.');
+    refreshAll();
+  } catch (e) {
+    $('#unlockmsg').textContent = '';
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+function refreshAll() { loadHealth(); loadRequests(); loadRules(); loadTokens(); loadAudit(); loadSettings(); }
+document.querySelector('[data-refresh]').onclick = refreshAll;
+refreshAll();
+// Pending requests age quickly - keep the top list fresh.
+setInterval(() => { loadRequests(); loadHealth(); }, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Geheimnisse und Laufzeitdaten gehoeren nicht ins Repository
+.env
+admin-token.txt
+vw-data/
+backups/
+*.tar.gz
+*.csv

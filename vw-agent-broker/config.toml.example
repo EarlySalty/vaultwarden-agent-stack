@@ -1,0 +1,103 @@
+# ============================================================================
+#  vw-agent-broker - Konfiguration
+#  Diese Datei nach "config.toml" kopieren und anpassen.
+#  Sie enthaelt Geheimnisse und gehoert NICHT in ein Git-Repository.
+#
+#  Jeder Wert laesst sich zusaetzlich per Umgebungsvariable ueberschreiben
+#  (BROKER_ + GROSSBUCHSTABEN, z.B. BROKER_ADMIN_PASS). Die Umgebung
+#  gewinnt immer - praktisch, um Secrets aus der Datei herauszuhalten.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Netzwerk
+# ----------------------------------------------------------------------------
+
+# Adresse, auf der der Broker lauscht (im Container immer 0.0.0.0).
+bind = "0.0.0.0:8088"
+
+# Oeffentlich erreichbare Basis-URL. Daraus baut der Broker die signierten
+# Freigabe-Links fuer die ntfy-Buttons - muss also von deinem Handy aus
+# erreichbar sein, sonst laufen "Freigeben"/"Verweigern" ins Leere.
+public_url = "https://broker.example.de"
+
+# Adresse des bw-CLI-Sidecars. Nur im internen Docker-Netz erreichbar!
+bw_url = "http://bw:8087"
+
+# ----------------------------------------------------------------------------
+# Vault-Synchronisation
+# ----------------------------------------------------------------------------
+
+# Abstand zwischen zwei "bw sync"-Aufrufen in Sekunden. Beim Start wird
+# immer sofort synchronisiert. 0 schaltet den periodischen Sync ab.
+# Faustregel: klein genug, dass eine Policy-Aenderung in der Bitwarden-App
+# zeitnah beim Broker ankommt.
+sync_interval = 60
+
+# ----------------------------------------------------------------------------
+# Policies
+# ----------------------------------------------------------------------------
+
+# Policy fuer Eintraege OHNE Custom Field "agent-policy".
+# Moeglich: "auto" (sofort herausgeben), "ask" (nachfragen), "deny" (sperren).
+# "ask" ist der sichere Standard - "auto" wuerde jeden neuen Eintrag der
+# Sammlung automatisch freigeben.
+default_policy = "ask"
+
+# Wie lange (Sekunden) eine Freigabe-Anfrage gueltig bleibt. Danach laeuft
+# sie ab, die ntfy-Links funktionieren nicht mehr und der Agent bekommt
+# den Status "expired".
+request_ttl = 300
+
+# ----------------------------------------------------------------------------
+# Missbrauchsschutz
+# ----------------------------------------------------------------------------
+
+# Maximale Anzahl API-Aufrufe pro Agent-Token und Minute. 0 = kein Limit.
+# Achtung: Das Warten auf eine Freigabe zaehlt mit - der Agent fragt dabei
+# etwa alle 3 Sekunden nach (also ~20 Aufrufe pro Minute und offener Anfrage).
+# Zu niedrig eingestellt bricht eine laufende Freigabe mit HTTP 429 ab.
+rate_limit = 120
+
+# ----------------------------------------------------------------------------
+# Datenbank
+# ----------------------------------------------------------------------------
+
+# SQLite-Datei mit Tokens, Anfragen, Merken-Regeln und Audit-Log.
+# ACHTUNG: Hier stehen NIEMALS Passwoerter - nur Metadaten.
+db_path = "/data/broker.db"
+
+# ----------------------------------------------------------------------------
+# ntfy (Push-Freigaben)
+# ----------------------------------------------------------------------------
+
+# Basis-URL des ntfy-Servers OHNE Topic - der Broker sendet im JSON-Format
+# und uebergibt das Topic im Rumpf der Nachricht.
+#   selbst gehostet:  https://ntfy.example.de
+#   oeffentlich:      https://ntfy.sh
+ntfy_url = "https://ntfy.example.de"
+
+# Topic-Name. Bei ntfy.sh unbedingt etwas Langes, Zufaelliges waehlen -
+# oeffentliche Topics kann sonst jeder mitlesen.
+ntfy_topic = "vault-agent"
+
+# Zugriffstoken (tk_...) fuer geschuetzte Topics. DRINGEND empfohlen:
+# Wer die Push-Nachricht lesen kann, kann auch auf "Freigeben" tippen!
+# Erzeugen mit:  docker compose exec ntfy ntfy token add DEIN-NTFY-BENUTZER
+ntfy_token = ""
+
+# ----------------------------------------------------------------------------
+# Dashboard (/admin, HTTP Basic Auth)
+# ----------------------------------------------------------------------------
+
+admin_user = "admin"
+# Langes, zufaelliges Passwort verwenden - das Dashboard darf alles freigeben.
+admin_pass = "HIER-EIN-LANGES-PASSWORT-EINTRAGEN"
+
+# ----------------------------------------------------------------------------
+# Server-Secret
+# ----------------------------------------------------------------------------
+
+# HMAC-Schluessel fuer die Einmal-Links in den ntfy-Nachrichten.
+# Erzeugen mit:  openssl rand -hex 32
+# Wird dieser Wert geaendert, werden alle offenen Freigabe-Links ungueltig.
+server_secret = "HIER-DAS-ERGEBNIS-VON-openssl-rand-hex-32-EINTRAGEN"

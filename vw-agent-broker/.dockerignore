@@ -1,0 +1,14 @@
+# Build-Artefakte und Geheimnisse gehoeren nicht in den Docker-Kontext.
+target/
+.git/
+.gitignore
+*.md
+config.toml
+.env
+.env.broker
+*.secret
+*.db
+*.db-wal
+*.db-shm
+docker-compose.agent.yml
+Caddyfile.agent

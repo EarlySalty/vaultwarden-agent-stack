@@ -1,0 +1,6 @@
+.env
+*.secret
+vw-data/
+backups/
+target/
+broker.db*
